@@ -111,6 +111,41 @@ return [
             // 'encrypt' => env('DB_ENCRYPT', 'yes'),
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
+        'mysql_site1' => [
+            'driver' => 'mysql',
+            'host' => env('DB_SITE1_HOST', '127.0.0.1'),
+            'port' => env('DB_SITE1_PORT', '3306'),
+            'database' => env('DB_SITE1_DATABASE', 'site1_db'),
+            'username' => env('DB_SITE1_USERNAME', 'root'),
+            'password' => env('DB_SITE1_PASSWORD', '1Qaz2Wsx!a!'),
+            'unix_socket' => env('DB_SITE1_SOCKET', '3306'),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
+        'mysql_site2' => [
+            'driver' => 'mysql',
+            'host' => env('DB_SITE2_HOST', '127.0.0.1'),
+            'port' => env('DB_SITE2_PORT', '3306'),
+            'database' => env('DB_SITE2_DATABASE', 'site2_db'),
+            'username' => env('DB_SITE2_USERNAME', 'root'),
+            'password' => env('DB_SITE2_PASSWORD', '1Qaz2Wsx!a!'),
+            'unix_socket' => env('DB_SITE2_SOCKET', '3306'),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
 
     ],
 
@@ -147,7 +182,7 @@ return [
 
         'options' => [
             'cluster' => env('REDIS_CLUSTER', 'redis'),
-            'prefix' => env('REDIS_PREFIX', Str::slug(env('APP_NAME', 'laravel'), '_').'_database_'),
+            'prefix' => env('REDIS_PREFIX', Str::slug(env('APP_NAME', 'laravel'), '_') . '_database_'),
         ],
 
         'default' => [

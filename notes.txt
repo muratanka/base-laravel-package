@@ -1,0 +1,253 @@
+1. HMVC Yapısının Kurulması
+
+To install via Composer, run:
+
+composer require nwidart/laravel-modules
+
+
+Publish the package's configuration file by running:
+
+php artisan vendor:publish --provider="Nwidart\Modules\LaravelModulesServiceProvider"
+
+By default, the module classes are not loaded automatically. You can autoload your modules by adding merge-plugin to the extra section; in root folder find composer.json file and find "extra" section then add below code;
+
+"extra": {
+    "laravel": {
+        "dont-discover": []
+    },
+    "merge-plugin": {
+        "include": [
+            "Modules/*/composer.json"
+        ]
+    }
+},
+
+Then do not forget to run below command;
+
+composer dump-autoload
+
+Creating a Sample Module ;
+
+php artisan module:make posts
+
+Then when you visit https://testsite.test/blog
+
+Hello World
+Module: Blog   
+
+page which shows module Blog is working correctly.
+
+2. MULTİ-SİTE DESTEĞİ (Farklı Domain ve Subdomain için)
+
+A. Config Dosyası ile Site Tanımları
+
+Tüm site ayarlarını tek bir yerden yönetmek için bir yapılandırma dosyası (config/sites.php) oluşturun:
+
+return [
+    'sites' => [
+        'site1' => [
+            'domain' => 'site1.example.com',
+            'db_connection' => 'mysql_site1',
+            'theme' => 'theme1',
+        ],
+        'site2' => [
+            'domain' => 'example2.com',
+            'db_connection' => 'mysql_site2',
+            'theme' => 'theme2',
+        ],
+    ],
+    'default_site' => 'site1', // Varsayılan site
+];
+
+B. Middleware ile Dinamik Site Algılama
+
+Alt ve farklı domainleri algılayarak ilgili ayarları uygulayan bir middleware oluşturun.
+
+php artisan make:middleware DetectSite
+
+Middleware içerisine aşağıdaki kodları ekleyin.
+
+namespace App\Http\Middleware;
+
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Closure;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
+
+
+class DetectSite
+{
+    public function handle(Request $request, Closure $next): Response
+    {
+        $host = $request->getHost(); // Gelen isteğin domain veya subdomain adresini alır.
+        $sites = config('sites.sites');
+        $defaultSite = config('sites.default_site');
+
+        // Gelen domain veya subdomain için ayarları bul
+        $currentSite = collect($sites)->firstWhere('domain', $host) ?? $sites[$defaultSite];
+
+        if (!$currentSite) {
+            Log::error("Site configuration for domain {$host} not found.");
+            abort(404, 'Site not configured.');
+        }
+
+        // Veritabanı bağlantısını ayarla
+        Config::set('database.default', $currentSite['db_connection']);
+        Config::set('app.theme', $currentSite['theme']);
+        Config::set('app.site', $host);
+
+        return $next($request);
+    }
+}
+
+C. Middleware’i bootstrap/app.php Üzerinden Tanımlama
+
+bootstrap/app.php dosyasını açın bu middleware'i global olarak kaydetmek için aşağıdaki kodu ekleyin:
+
+->withMiddleware(function (Middleware $middleware) {
+        // Middleware'i doğrudan buraya ekliyoruz.
+        $middleware->append(DetectSite::class);
+    })
+
+D. Veritabanı Bağlantılarını config/database.php Dosyasına Ekleyin
+
+config/database.php Dosyasını Açın: Bu dosyada farklı veritabanı bağlantılarını tanımlamanız gerekiyor.
+
+Bağlantıları Tanımlayın: connections array'ine mysql_site1 ve mysql_site2 gibi bağlantılarınızı ekleyin.
+
+'connections' => [
+    'mysql' => [
+        'driver' => 'mysql',
+        'host' => env('DB_HOST', '127.0.0.1'),
+        'port' => env('DB_PORT', '3306'),
+        'database' => env('DB_DATABASE', 'forge'),
+        'username' => env('DB_USERNAME', 'forge'),
+        'password' => env('DB_PASSWORD', ''),
+        'unix_socket' => env('DB_SOCKET', ''),
+        'charset' => 'utf8mb4',
+        'collation' => 'utf8mb4_unicode_ci',
+        'prefix' => '',
+        'strict' => true,
+        'engine' => null,
+        'options' => extension_loaded('pdo_mysql') ? array_filter([
+            PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+        ]) : [],
+    ],
+
+    'mysql_site1' => [
+        'driver' => 'mysql',
+        'host' => env('DB_SITE1_HOST', '127.0.0.1'),
+        'port' => env('DB_SITE1_PORT', '3306'),
+        'database' => env('DB_SITE1_DATABASE', 'site1_db'),
+        'username' => env('DB_SITE1_USERNAME', 'root'),
+        'password' => env('DB_SITE1_PASSWORD', ''),
+        'unix_socket' => env('DB_SITE1_SOCKET', ''),
+        'charset' => 'utf8mb4',
+        'collation' => 'utf8mb4_unicode_ci',
+        'prefix' => '',
+        'strict' => true,
+        'engine' => null,
+        'options' => extension_loaded('pdo_mysql') ? array_filter([
+            PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+        ]) : [],
+    ],
+
+    'mysql_site2' => [
+        'driver' => 'mysql',
+        'host' => env('DB_SITE2_HOST', '127.0.0.1'),
+        'port' => env('DB_SITE2_PORT', '3306'),
+        'database' => env('DB_SITE2_DATABASE', 'site2_db'),
+        'username' => env('DB_SITE2_USERNAME', 'root'),
+        'password' => env('DB_SITE2_PASSWORD', ''),
+        'unix_socket' => env('DB_SITE2_SOCKET', ''),
+        'charset' => 'utf8mb4',
+        'collation' => 'utf8mb4_unicode_ci',
+        'prefix' => '',
+        'strict' => true,
+        'engine' => null,
+        'options' => extension_loaded('pdo_mysql') ? array_filter([
+            PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+        ]) : [],
+    ],
+],
+
+
+E. Domain/Subdomain Testleri
+
+hosts Dosyasını Güncelleyin: Subdomain ve domain yapılandırmalarını test etmek için hosts dosyanıza şu girişleri ekleyin:
+
+127.0.0.1   site1.example.com
+127.0.0.1   example2.com
+
+Local ortamda Laravel’in yerleşik sunucusunu başlatın:
+
+php artisan serve --host=127.0.0.1 --port=8000
+
+site1.example.com:8000 ve example2.com:8000 adreslerine erişerek test edin.
+
+
+
+
+2. Multi-Theme Desteği (HMVC ve nwidart/laravel-modules ile)
+A. Modüllerle Uyumlu Tema Yönetimi
+Tüm modüllerin kendi views klasöründe temaları yönetmesini sağlayacak bir yapı ekliyoruz.
+
+config/themes.php dosyası:
+
+php
+Kodu kopyala
+return [
+    'themes' => [
+        'theme1' => [
+            'views_path' => 'Modules/{module}/Resources/themes/theme1',
+        ],
+        'theme2' => [
+            'views_path' => 'Modules/{module}/Resources/themes/theme2',
+        ],
+    ],
+    'default_theme' => 'theme1',
+];
+B. ServiceProvider’da Tema Yönetimi
+AppServiceProvider içinde aktif temayı ayarlayın:
+
+php
+Kodu kopyala
+public function boot()
+{
+    $currentTheme = config('app.theme', config('themes.default_theme'));
+    $modules = app('modules')->allEnabled();
+
+    foreach ($modules as $module) {
+        $viewPath = str_replace('{module}', $module->getName(), config("themes.themes.$currentTheme.views_path"));
+        if (is_dir(base_path($viewPath))) {
+            view()->addNamespace($module->getLowerName(), base_path($viewPath));
+        }
+    }
+}
+C. Tema Yapısını Organize Etme
+Modüllerdeki views klasörünü şu şekilde organize edin:
+
+plaintext
+Kodu kopyala
+Modules/
+  Blog/
+    Resources/
+      themes/
+        theme1/
+          index.blade.php
+        theme2/
+          index.blade.php
+D. Dinamik Tema Testi
+Her site için doğru temayı test edin:
+
+site1.example.com için theme1'in index.blade.php dosyasını düzenleyin:
+html
+Kodu kopyala
+<h1>Bu Theme1 için bir testtir</h1>
+example2.com için theme2'nin görünümünü düzenleyin:
+html
+Kodu kopyala
+<h1>Bu Theme2 için bir testtir</h1>
+
+
