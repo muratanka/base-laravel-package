@@ -1,12 +1,12 @@
 <?php
 
-namespace Modules\Blog\Http\Controllers;
+namespace Modules\News\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Http\Controllers\BaseController;
 
-class BlogController extends BaseController
+class NewsController extends BaseController
 {
     /**
      * Display a listing of the resource.
@@ -21,7 +21,7 @@ class BlogController extends BaseController
      */
     public function create()
     {
-        return view('blog::create');
+        return view('news::create');
     }
 
     /**
@@ -37,7 +37,7 @@ class BlogController extends BaseController
      */
     public function show($id)
     {
-        return view('blog::show');
+        return view('news::show');
     }
 
     /**
@@ -45,7 +45,7 @@ class BlogController extends BaseController
      */
     public function edit($id)
     {
-        return view('blog::edit');
+        return view('news::edit');
     }
 
     /**

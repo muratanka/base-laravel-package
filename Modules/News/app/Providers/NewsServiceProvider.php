@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\Blog\Providers;
+namespace Modules\News\Providers;
 
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
@@ -9,13 +9,13 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use App\Providers\BaseModuleServiceProvider;
 
-class BlogServiceProvider extends BaseModuleServiceProvider
+class NewsServiceProvider extends BaseModuleServiceProvider
 {
     use PathNamespace;
 
-    protected string $name = 'Blog';
+    protected string $name = 'News';
 
-    protected string $nameLower = 'blog';
+    protected string $nameLower = 'news';
 
     /**
      * Boot the application events.

@@ -67,35 +67,43 @@ php artisan make:middleware DetectSite
 
 Middleware içerisine aşağıdaki kodları ekleyin.
 
+<?php
+
 namespace App\Http\Middleware;
 
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Closure;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
+use Illuminate\View\FileViewFinder;
+
 
 
 class DetectSite
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $host = $request->getHost(); // Gelen isteğin domain veya subdomain adresini alır.
+        $host = $request->getHost();
         $sites = config('sites.sites');
         $defaultSite = config('sites.default_site');
 
-        // Gelen domain veya subdomain için ayarları bul
         $currentSite = collect($sites)->firstWhere('domain', $host) ?? $sites[$defaultSite];
 
         if (!$currentSite) {
-            Log::error("Site configuration for domain {$host} not found.");
-            abort(404, 'Site not configured.');
+            abort(404, 'Site configuration not found for domain: ' . $host);
         }
+
+        Log::info('Current Site:', $currentSite);
 
         // Veritabanı bağlantısını ayarla
         Config::set('database.default', $currentSite['db_connection']);
+
+        // Aktif temayı ayarla
         Config::set('app.theme', $currentSite['theme']);
-        Config::set('app.site', $host);
+
+
 
         return $next($request);
     }
@@ -189,55 +197,221 @@ site1.example.com:8000 ve example2.com:8000 adreslerine erişerek test edin.
 
 
 
-2. Multi-Theme Desteği (HMVC ve nwidart/laravel-modules ile)
+3. Multi-Theme Desteği (HMVC ve nwidart/laravel-modules ile)
+
 A. Modüllerle Uyumlu Tema Yönetimi
 Tüm modüllerin kendi views klasöründe temaları yönetmesini sağlayacak bir yapı ekliyoruz.
 
 config/themes.php dosyası:
 
-php
-Kodu kopyala
+<?php
 return [
-    'themes' => [
-        'theme1' => [
-            'views_path' => 'Modules/{module}/Resources/themes/theme1',
-        ],
-        'theme2' => [
-            'views_path' => 'Modules/{module}/Resources/themes/theme2',
-        ],
-    ],
-    'default_theme' => 'theme1',
-];
-B. ServiceProvider’da Tema Yönetimi
-AppServiceProvider içinde aktif temayı ayarlayın:
+  'default_theme' => 'theme1', // Varsayılan tema
 
-php
-Kodu kopyala
-public function boot()
+  'themes' => [
+    'theme1' => [
+      'views_path' => 'Modules/{module}/Resources/views/themes/theme1',
+    ],
+    'theme2' => [
+      'views_path' => 'Modules/{module}/Resources/views/themes/theme2',
+    ],
+  ],
+];
+
+B. Tema Yollarının Dinamik olarak register edilmesi İçin bir BaseModuleServiceProvider oluşturalım içeriği:
+
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Config;
+
+class BaseModuleServiceProvider extends ServiceProvider
 {
+  protected string $name = ''; // Modül adı
+  protected string $theme = ''; // Tema adı
+
+  /**
+   * Boot işlemleri.
+   */
+  public function boot(): void
+  {
+    $this->registerThemeAndViews();
+    $this->registerModuleViewNamespaces();
+  }
+
+  /**
+   * Tema ve view yollarını dinamik olarak ayarlar.
+   */
+  protected function registerThemeAndViews(): void
+  {
+    // Aktif tema adı
+    $theme = $this->theme ?: config('app.theme');
+    Config::set('app.theme', $theme);
+
+    // Modül view yolları
+    $themePath = resource_path("views/themes/{$theme}");
+    $modulePaths = glob(base_path("Modules/*/Resources/views/themes/{$theme}"), GLOB_ONLYDIR);
+
+    // Laravel View Finder ile view yollarını ayarla
+    $viewFinder = app('view.finder');
+    $viewPaths = array_merge($modulePaths, [$themePath], $viewFinder->getPaths());
+    $viewFinder->setPaths($viewPaths);
+
+    // Varsayılan view namespace'ini yükle
+    $this->loadViewsFrom(module_path($this->name, 'Resources/views'), $this->name);
+
+    // Blade Cache'i tema bazlı ayarla
+    $compiledPath = storage_path("framework/views/{$theme}");
+    if (!is_dir($compiledPath)) {
+      mkdir($compiledPath, 0755, true);
+    }
+    Config::set('view.compiled', $compiledPath);
+
+    // Loglama
+    logger()->info("Views and theme paths registered for module: {$this->name}", $viewFinder->getPaths());
+  }
+
+  /**
+   * Modül view namespace'lerini dinamik olarak ekle.
+   */
+  protected function registerModuleViewNamespaces(): void
+  {
     $currentTheme = config('app.theme', config('themes.default_theme'));
     $modules = app('modules')->allEnabled();
 
     foreach ($modules as $module) {
-        $viewPath = str_replace('{module}', $module->getName(), config("themes.themes.$currentTheme.views_path"));
-        if (is_dir(base_path($viewPath))) {
-            view()->addNamespace($module->getLowerName(), base_path($viewPath));
-        }
+      $viewPath = str_replace(
+        '{module}',
+        $module->getName(),
+        config("themes.themes.$currentTheme.views_path")
+      );
+
+      if (is_dir(base_path($viewPath))) {
+        view()->addNamespace($module->getLowerName(), base_path($viewPath));
+      }
     }
+  }
 }
-C. Tema Yapısını Organize Etme
+
+
+C. Tema Load işleminin dinamikleştirilmesi için bir app/Http/Controllers/BaseController.php  dosyası oluşturalım:
+
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Log;
+
+class BaseController extends Controller
+{
+  /**
+   * Dinamik olarak temaya ve modüle özgü view döndürür.
+   *
+   * @param string $view
+   * @param array $data
+   * @return \Illuminate\View\View
+   */
+  protected function loadView(string $view, array $data = [])
+  {
+    $theme = config('app.theme');
+    $module = $this->getModuleName();
+
+    if (!$module) {
+      abort(500, 'Module name could not be determined.');
+    }
+
+    // Temaya ve modüle özgü view yolu
+    $themeView = "{$module}::themes.{$theme}.{$view}";
+    Log::info("Checking view existence: {$themeView}");
+    $defaultView = "{$module}::default.{$view}";
+    Log::info("Default view: {$defaultView}");
+
+    if (view()->exists($themeView)) {
+      Log::info("View found: {$themeView}");
+      return view($themeView, $data);
+    } elseif (view()->exists($defaultView)) {
+      Log::info("Falling back to default view: {$defaultView}");
+      return view($defaultView, $data);
+    } else {
+
+      Log::info("View Path Hatalı: ['View Yok']");
+    }
+
+    abort(404, "View [{$themeView}] or [{$defaultView}] not found.");
+  }
+
+  /**
+   * Modül adını belirle.
+   *
+   * @return string|null
+   */
+  protected function getModuleName()
+  {
+    $namespaceParts = explode('\\', static::class);
+
+    if (in_array('Modules', $namespaceParts)) {
+      $module = $namespaceParts[array_search('Modules', $namespaceParts) + 1];
+      Log::info("Detected Module Name: {$module}");
+      return $module;;
+    }
+
+    return null;
+  }
+}
+
+
+D. Yeni bir Modül oluşturulduğunda aşağıdaki düzenlemelerin modül dosyalarında yapılması gerekiyor;
+
+ModulenameServiceProvider.php dosyasındaki extends Service Provider kısmını BaseModuleServiceProvider olarak güncelle,
+
+Bul
+class NewsServiceProvider extends ServiceProvider
+{
+
+Değiştir
+
+use App\Providers\BaseModuleServiceProvider;
+class NewsServiceProvider extends BaseModuleServiceProvider
+{
+
+Aynı dosya da boot methodundaki;
+Bul
+$this->registerViews();
+Değiştir
+$this->registerThemeAndViews(); // BaseModuleServiceProvider dan geliyor
+
+Modüldeki app/Http/Controllers/ModulenameController.php dosyasındaki methodlarda şu düzenlemeyi yapın;
+
+üst kısma şunu ekle;
+
+use App\Http\Controllers\BaseController;
+
+Bul
+
+return view('news::index');
+
+Değiştir
+
+return $this->loadView('index');
+
+D. Tema Yapısını Organize Etme
+
 Modüllerdeki views klasörünü şu şekilde organize edin:
 
-plaintext
-Kodu kopyala
 Modules/
   Blog/
     Resources/
-      themes/
-        theme1/
-          index.blade.php
-        theme2/
-          index.blade.php
+        views
+          themes/
+             theme1/
+                index.blade.php
+          theme2/
+                index.blade.php
+
+
 D. Dinamik Tema Testi
 Her site için doğru temayı test edin:
 
@@ -249,5 +423,11 @@ example2.com için theme2'nin görünümünü düzenleyin:
 html
 Kodu kopyala
 <h1>Bu Theme2 için bir testtir</h1>
+
+Test URL
+
+site1.example.com/modulename
+
+example2.com/modulename
 
 
