@@ -16,7 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
     // Middleware yapılandırması
     ->withMiddleware(function (Middleware $middleware) {
-        // Middleware'i doğrudan buraya ekliyoruz.
+        // DetectSite Middleware'i başa eklenir
         $middleware->prepend(DetectSite::class);
     })
 

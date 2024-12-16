@@ -23,6 +23,8 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
     private function registerDynamicConfiguration(): void
     {
         $host = request()->getHost();
+        $this->configureBladeCache($host);
+        $this->configureLogging($host);
         Log::info('Current Host:', ['host' => $host]);
 
         $site = Site::on('mysql') // Ana veritabanı bağlantısı
@@ -30,7 +32,6 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
             ->first();
 
         if (!$site) {
-            // Site yoksa, localhost olup olmadığını kontrol et
             if ($host === 'localhost') {
                 $this->configureDefaultSite($host, true);
             } else {
@@ -39,7 +40,6 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
             return;
         }
 
-        // Ana site mi, müşteri sitesi mi kontrol et
         if ($site->type === 'main') {
             $this->configureMainSite($site);
         } elseif ($site->type === 'customer') {
@@ -48,9 +48,9 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
             abort(404, 'Invalid site type.');
         }
 
-        // **Tema Ayarı**
-        $theme = $site->theme ?? $this->theme; // Ana site için varsayılan temayı ayarla
+        $theme = $site->theme ?? $this->theme;
         Config::set('app.theme', $theme);
+        $this->configureViewPaths(Config::get('app.theme'));
         Config::set('app.locale', $site->default_language ?? config('app.locale'));
 
         Log::info('Theme and Locale Configured:', [
@@ -61,12 +61,10 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
 
     private function configureMainSite(Site $site): void
     {
-        // Main site varsayılan veritabanını kullanır
         Config::set('database.default', 'mysql');
 
-        // Varsayılan tema kontrolü
         if (!$site->theme) {
-            $site->theme = 'default'; // Varsayılan tema
+            $site->theme = 'default';
         }
 
         Log::info("Main site configured for domain: {$site->domain}");
@@ -98,18 +96,53 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
             abort(500, 'Database connection failed.');
         }
     }
+
     private function configureDefaultSite(string $host): void
     {
         Log::warning("No site configuration found for host: {$host}");
 
-        // Varsayılan site ayarları
         $site = new Site([
             'domain' => $host,
-            'type' => 'main', // Ana site varsayılan
-            'theme' => 'default', // Varsayılan tema
-            'default_language' => 'en', // Varsayılan dil
+            'type' => 'main',
+            'theme' => 'default',
+            'default_language' => 'en',
         ]);
 
         $this->configureMainSite($site);
+    }
+
+    private function configureBladeCache(string $domain): void
+    {
+        $compiledPath = storage_path("framework/views/{$domain}");
+        if (!is_dir($compiledPath)) {
+            mkdir($compiledPath, 0755, true);
+        }
+        Config::set('view.compiled', $compiledPath);
+        Log::info("Blade cache path configured: {$compiledPath}");
+    }
+
+    private function configureViewPaths(string $theme): void
+    {
+        $viewFinder = app('view.finder');
+
+        $viewPaths = [
+            module_path($this->name, "Resources/views/themes/{$theme}"),
+            resource_path("views/themes/{$theme}")
+        ];
+
+        foreach ($viewPaths as $path) {
+            if (is_dir($path)) {
+                $viewFinder->prependLocation($path);
+            }
+        }
+
+        Log::info('View paths configured:', $viewPaths);
+    }
+
+    private function configureLogging(string $domain): void
+    {
+        $logPath = storage_path("logs/{$domain}.log");
+        Config::set('logging.channels.daily.path', $logPath);
+        Log::info("Log file configured for: {$domain}");
     }
 }
