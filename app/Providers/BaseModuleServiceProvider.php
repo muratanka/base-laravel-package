@@ -16,7 +16,7 @@ class BaseModuleServiceProvider extends ServiceProvider
   public function boot(): void
   {
     $this->registerThemeAndViews();
-    $this->registerModuleViewNamespaces();
+    $this->registerMigrations();
   }
 
   /**
@@ -24,50 +24,45 @@ class BaseModuleServiceProvider extends ServiceProvider
    */
   protected function registerThemeAndViews(): void
   {
-    // Aktif tema adı
     $theme = $this->theme ?: config('app.theme');
     Config::set('app.theme', $theme);
 
-    // Modül view yolları
+    // Tema yollarını ayarla
     $themePath = resource_path("views/themes/{$theme}");
     $modulePaths = glob(base_path("Modules/*/Resources/views/themes/{$theme}"), GLOB_ONLYDIR);
 
-    // Laravel View Finder ile view yollarını ayarla
+    // View Finder ile yolları ekle
     $viewFinder = app('view.finder');
-    $viewPaths = array_merge($modulePaths, [$themePath], $viewFinder->getPaths());
-    $viewFinder->setPaths($viewPaths);
+    $viewPaths = array_merge(
+      [$themePath], // Tema genel yolları
+      $modulePaths, // Modül temaları
+      $viewFinder->getPaths() // Mevcut yollar
+    );
 
-    // Varsayılan view namespace'ini yükle
-    $this->loadViewsFrom(module_path($this->name, 'Resources/views'), $this->name);
+    $viewFinder->setPaths(array_values(array_unique($viewPaths)));
 
-    // Blade Cache'i tema bazlı ayarla
+    // Varsayılan view namespace'ini ekle
+    if ($this->name) {
+      $this->loadViewsFrom(module_path($this->name, 'Resources/views'), $this->name);
+    }
+
+    // Blade cache yolunu tema bazlı yap
     $compiledPath = storage_path("framework/views/{$theme}");
     if (!is_dir($compiledPath)) {
       mkdir($compiledPath, 0755, true);
     }
     Config::set('view.compiled', $compiledPath);
-
-    // Loglama
-    //logger()->info("Views and theme paths registered for module: {$this->name}", $viewFinder->getPaths());
   }
 
   /**
-   * Modül view namespace'lerini dinamik olarak ekle.
+   * Modül migration dosyalarını otomatik yükler.
    */
-  protected function registerModuleViewNamespaces(): void
+  protected function registerMigrations(): void
   {
-    $currentTheme = config('app.theme', config('themes.default_theme'));
-    $modules = app('modules')->allEnabled();
-
-    foreach ($modules as $module) {
-      $viewPath = str_replace(
-        '{module}',
-        $module->getName(),
-        config("themes.themes.$currentTheme.views_path")
-      );
-
-      if (is_dir(base_path($viewPath))) {
-        view()->addNamespace($module->getLowerName(), base_path($viewPath));
+    if ($this->name) {
+      $migrationsPath = module_path($this->name, 'database/migrations');
+      if (is_dir($migrationsPath)) {
+        $this->loadMigrationsFrom($migrationsPath);
       }
     }
   }

@@ -1,7 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Modules\MultiSite\Http\Controllers\BaseController;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+// Root rotasını BaseController'a yönlendirin
+Route::get('/', [BaseController::class, 'index'])->middleware('web');

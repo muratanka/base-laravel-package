@@ -1,4 +1,5 @@
 {
     "Blog": true,
-    "News": true
+    "News": true,
+    "MultiSite": true
 }

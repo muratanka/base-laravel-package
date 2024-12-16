@@ -430,4 +430,385 @@ site1.example.com/modulename
 
 example2.com/modulename
 
+4. Multi-Theme Desteğinin HMVC modül olarak Dinamik Hale Getirilmesi
 
+php artisan module:make MultiSite
+
+Müşteri siteleri ve hosting bilgilerini saklamak için gerekli tabloları tanımlıyoruz.
+
+php artisan make:migration create_sites_table --path=Modules/MultiSite/Database/Migrations
+
+Migration Dosyalarını Güncelle
+
+Modules/MultiSite/Database/Migrations/xxxx_xx_xx_create_sites_table.php:
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class CreateSitesTable extends Migration
+{
+    public function up()
+    {
+        Schema::create('sites', function (Blueprint $table) {
+            $table->id();
+            $table->string('domain')->unique();
+            $table->string('theme')->nullable();
+            $table->unsignedBigInteger('hosting_id')->nullable();
+            $table->string('db_name')->nullable();
+            $table->timestamps();
+
+            $table->foreign('hosting_id')->references('id')->on('hostings')->onDelete('set null');
+        });
+    }
+
+    public function down()
+    {
+        Schema::dropIfExists('sites');
+    }
+}
+
+php artisan make:migration create_hostings_table --path=Modules/MultiSite/Database/Migrations
+
+Modules/MultiSite/Database/Migrations/xxxx_xx_xx_create_hostings_table.php:
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class CreateHostingsTable extends Migration
+{
+    public function up()
+    {
+        Schema::create('hostings', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('db_host');
+            $table->integer('max_capacity')->default(10);
+            $table->integer('current_capacity')->default(0);
+            $table->timestamps();
+        });
+    }
+
+    public function down()
+    {
+        Schema::dropIfExists('hostings');
+    }
+}
+
+
+php artisan make:migration create_orders_table --path=Modules/MultiSite/Database/Migrations
+
+Modules/MultiSite/Database/Migrations/create_orders_table.php
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class CreateOrdersTable extends Migration
+{
+    public function up()
+    {
+        Schema::create('orders', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('site_id');
+            $table->date('start_date');
+            $table->date('end_date');
+            $table->string('status')->default('active');
+            $table->timestamps();
+
+            $table->foreign('site_id')->references('id')->on('sites')->onDelete('cascade');
+        });
+    }
+
+    public function down()
+    {
+        Schema::dropIfExists('orders');
+    }
+}
+
+Model’lerin Hazırlanması
+
+Hosting Modeli
+
+Modules/MultiSite/Entities/Hosting.php
+
+<?php
+
+namespace Modules\MultiSite\Entities;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Hosting extends Model
+{
+    protected $fillable = ['name', 'db_host', 'max_capacity', 'current_capacity'];
+
+    public function sites()
+    {
+        return $this->hasMany(Site::class);
+    }
+}
+
+
+Site Modeli
+
+Modules/MultiSite/Entities/Site.php
+
+<?php
+
+namespace Modules\MultiSite\Entities;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Site extends Model
+{
+    protected $fillable = ['domain', 'theme', 'hosting_id', 'db_name'];
+
+    public function hosting()
+    {
+        return $this->belongsTo(Hosting::class);
+    }
+
+    public function orders()
+    {
+        return $this->hasMany(Order::class);
+    }
+}
+
+Order Modeli
+
+Modules/MultiSite/Entities/Order.php
+
+<?php
+
+namespace Modules\MultiSite\Entities;
+
+use Illuminate\Database\Eloquent\Model;
+use Carbon\Carbon;
+
+class Order extends Model
+{
+    protected $fillable = ['site_id', 'start_date', 'end_date', 'status'];
+
+    public function site()
+    {
+        return $this->belongsTo(Site::class);
+    }
+
+    public function isExpired(): bool
+    {
+        return Carbon::now()->greaterThan($this->end_date);
+    }
+}
+
+Service Provider
+
+Modules/MultiSite/Providers/MultiSiteServiceProvider.php
+
+Service Provider
+
+Modules/MultiSite/Providers/MultiSiteServiceProvider.php
+
+
+<?php
+
+namespace Modules\MultiSite\Providers;
+
+use Illuminate\Support\ServiceProvider;
+use Modules\MultiSite\Entities\Site;
+
+class MultiSiteServiceProvider extends ServiceProvider
+{
+    public function boot(): void
+    {
+        $this->loadMigrationsFrom(module_path('MultiSite', 'Database/Migrations'));
+        $this->registerSiteConfiguration();
+    }
+
+    protected function registerSiteConfiguration(): void
+    {
+        $host = request()->getHost();
+
+        $site = Site::where('domain', $host)->with('orders')->first();
+
+        if (!$site) {
+            abort(404, "Site not found for domain: {$host}");
+        }
+
+        $activeOrder = $site->orders()->where('status', 'active')->latest('end_date')->first();
+
+        if (!$activeOrder || $activeOrder->isExpired()) {
+            abort(403, "The service for this site has expired.");
+        }
+
+        config()->set('database.connections.dynamic', [
+            'driver' => 'mysql',
+            'host' => $site->hosting->db_host,
+            'database' => $site->db_name,
+            'username' => env('DB_USERNAME'),
+            'password' => env('DB_PASSWORD'),
+        ]);
+
+        config()->set('database.default', 'dynamic');
+        config()->set('app.theme', $site->theme);
+    }
+}
+
+Middleware
+
+Modules/MultiSite/Http/Middleware/DetectSite.php
+
+<?php
+
+namespace Modules\MultiSite\Http\Middleware;
+
+use Closure;
+use Modules\MultiSite\Entities\Site;
+
+class DetectSite
+{
+    public function handle($request, Closure $next)
+    {
+        $host = $request->getHost();
+
+        $site = Site::where('domain', $host)->with('orders')->first();
+
+        if (!$site) {
+            abort(404, "Site not found for domain: {$host}");
+        }
+
+        return $next($request);
+    }
+}
+
+Not: Bu aşamada MultiSiteServiceProvider.php boot methodundaki $this->registerSiteConfiguration();  kodu hata verecek onu önce çift slash ile etkisiz hale getirin sonra aşağıdaki komutları çalıştırdıktan sonra aktif edin.
+
+php artisan tinker
+
+Hosting Kaydı Ekleyin:
+
+use Modules\MultiSite\Entities\Hosting;
+
+$hosting = Hosting::create([
+    'name' => 'Hosting1',
+    'db_host' => '127.0.0.1',
+    'max_capacity' => 10,
+    'current_capacity' => 0,
+]);
+
+Site Kaydı Ekleyin:
+
+use Modules\MultiSite\Entities\Site;
+
+$site = Site::create([
+    'domain' => 'site1.test',
+    'theme' => 'theme1',
+    'hosting_id' => $hosting->id,
+    'db_name' => 'site1_db',
+]);
+
+Sipariş (Order) Kaydı Ekleyin:
+
+use Modules\MultiSite\Entities\Order;
+
+Order::create([
+    'site_id' => $site->id,
+    'start_date' => now(),
+    'end_date' => now()->addYear(),
+    'status' => 'active',
+]);
+
+Tinker Konsolundan Çıkın:
+
+    exit
+
+MultiSiteServiceProvider.php dosyasında pasif hale getirdiğiniz kodu aktif edin. 
+
+
+Test Adresine Erişim
+
+Localhost Üzerinde Domain Yönlendirmesi: site1.test gibi bir domaini test etmek için hosts dosyanıza bir kayıt eklemeniz gerekir:
+Windows: C:\Windows\System32\drivers\etc\hosts
+Dosyaya şu satırı ekleyin:
+
+127.0.0.1 site1.test
+
+
+Eski dosyaları Silin;
+
+config/sites.php silinecek
+
+Modules/MultiSite/modules.json içerisine şu kodu ekleyin;
+
+{
+    "name": "MultiSite",
+    "alias": "multisite",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\MultiSite\\Providers\\MultiSiteServiceProvider",
+        "Modules\\MultiSite\\Providers\\EventServiceProvider",
+        "Modules\\MultiSite\\Providers\\RouteServiceProvider"
+    ],
+    "files": [
+        "app/Http/Middleware/DetectSite.php",
+        "Entities/Site.php",
+        "Entities/Order.php",
+        "Entities/Hosting.php"
+    ]
+}
+
+Modules/MultiSite/composer.json içerisinde autoload psr-4 kısmına şu kodu ekleyin;
+
+"autoload": {
+        "psr-4": {
+            "Modules\\MultiSite\\": "app/",
+            "Modules\\MultiSite\\Database\\Factories\\": "database/factories/",
+            "Modules\\MultiSite\\Database\\Seeders\\": "database/seeders/",
+            "Modules\\MultiSite\\Entities\\": "entities/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\MultiSite\\Tests\\": "tests/"
+        }
+    }
+
+app/Http/Providers/MultiSiteServiceProvider.php dosyasında registerSiteConfiguration methodundan yapılan config/sites.php dosyasına olan request kısmını silin.
+
+//$sites = config('sites.sites');
+
+
+Laravel Uygulamasını Başlatın:
+
+php artisan serve --host=127.0.0.1 --port=8000
+
+Tarayıcıda Test Edin (veritabanından order tablosundan end_date editleyerek kontrol sağlanabilir.):
+http://site1.test:8000 adresine gidin.
+Eğer hizmet süresi dolmamışsa, tema veya varsayılan sayfa yüklenir.
+Eğer hizmet süresi dolmuşsa, 403 - Service expired hatası görürsünüz.
+
+
+Varsayılan Route Ayarı
+
+Eğer site1.test için bir varsayılan ana sayfa döndürmek istiyorsanız, aşağıdaki adımları izleyin:
+
+    routes/web.php İçin Varsayılan Route Ayarı:
+
+use Illuminate\Support\Facades\Route;
+
+Route::get('/', function () {
+    $theme = config('app.theme'); // Aktif temayı al
+    return view("themes.{$theme}.index");
+});
+
+Tema İçin Varsayılan View Dosyası: resources/views/themes/theme1/index.blade.php dosyasını oluşturun ve içine bir ana sayfa içeriği ekleyin:
+
+    <h1>Welcome to Theme 1</h1>

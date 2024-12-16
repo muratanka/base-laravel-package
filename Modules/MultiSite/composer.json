@@ -1,0 +1,26 @@
+{
+    "name": "nwidart/multisite",
+    "description": "",
+    "authors": [
+        {
+            "name": "Nicolas Widart",
+            "email": "n.widart@gmail.com"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {}
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\": "Modules/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\MultiSite\\Tests\\": "tests/"
+        }
+    }
+}

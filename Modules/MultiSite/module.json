@@ -1,0 +1,18 @@
+{
+    "name": "MultiSite",
+    "alias": "multisite",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\MultiSite\\Providers\\MultiSiteServiceProvider",
+        "Modules\\MultiSite\\Providers\\EventServiceProvider",
+        "Modules\\MultiSite\\Providers\\RouteServiceProvider"
+    ],
+    "files": [
+        "app/Http/Middleware/DetectSite.php",
+        "Entities/Site.php",
+        "Entities/Order.php",
+        "Entities/Hosting.php"
+    ]
+}
