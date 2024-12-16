@@ -30,7 +30,13 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
             ->first();
 
         if (!$site) {
-            abort(404, 'Site not found.');
+            // Site yoksa, localhost olup olmadığını kontrol et
+            if ($host === 'localhost') {
+                $this->configureDefaultSite($host, true);
+            } else {
+                abort(404, 'Site not found.');
+            }
+            return;
         }
 
         // Ana site mi, müşteri sitesi mi kontrol et
@@ -91,5 +97,19 @@ class MultiSiteServiceProvider extends BaseModuleServiceProvider
             Log::error("Dynamic database connection failed for {$site->db_name}: " . $e->getMessage());
             abort(500, 'Database connection failed.');
         }
+    }
+    private function configureDefaultSite(string $host): void
+    {
+        Log::warning("No site configuration found for host: {$host}");
+
+        // Varsayılan site ayarları
+        $site = new Site([
+            'domain' => $host,
+            'type' => 'main', // Ana site varsayılan
+            'theme' => 'default', // Varsayılan tema
+            'default_language' => 'en', // Varsayılan dil
+        ]);
+
+        $this->configureMainSite($site);
     }
 }
